@@ -1,0 +1,59 @@
+trigger:
+  branches:
+    include:
+      - main
+pool:
+  vmImage: 'ubuntu-latest'
+
+resources:
+  - repository: githubrepo
+    type: github
+    name: your-repo-org/your-repo-name
+    endpoint: github-service-connection
+
+stages:
+  - stage: Validation
+    displayName: 'Validation Stage'
+    jobs:
+      - job: Validate
+        displayName: 'Validate Python, Terraform and Kubernetes'
+        steps:
+        - checkout: githubrepo
+          clean: true
+        
+        #python validation
+        - task: UsePythonVersion@0
+          inputs:
+            versionSpec: '3.x'
+            addToPath: true
+
+            -script|
+              cd app
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+              python -m unittest discover -s tests 
+              pytest pytest-cov ruff
+              ruff check app --select ALL
+              python -m pytest tests/ \
+              --cov=app \
+              --cov-report=xml
+            
+        #terraform validation
+        - task: TerraformInstaller@1
+          inputs:
+            terraformVersion: '1.5.7' 
+          script: |
+            cd terraform
+            terraform init
+            terraform validate
+            terraform fmt -check
+            checkov --config-file checkov.yaml --directory . -o terraform_report.json 
+
+        #kubernetes validation
+        - task: KubectlInstaller@0  
+          inputs:
+            kubectlVersion: 'latest'
+          script: |
+            cd k8s
+            kubectl apply --dry-run=client -f . 
+            kubeval --strict --exit-on-error --kubernetes-version="1.24.0" .

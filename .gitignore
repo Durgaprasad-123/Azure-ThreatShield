@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor files
+.vscode/
+.idea/
