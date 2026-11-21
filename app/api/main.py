@@ -1,5 +1,8 @@
-from fastapi import FastAPI #it imports the FastAPI Class from the fastapi package
-from fastapi import HTTPException
+from fastapi import (
+    FastAPI,  #it imports the FastAPI Class from the fastapi package
+    HTTPException,
+)
+
 from app.collector.deduplicator import remove_duplicates
 
 app = FastAPI()
@@ -7,6 +10,8 @@ app = FastAPI()
 def health():
     return { "status": "healthy", "service": "Azure-threatshield"}
 from app.collector.threatfox import fetch_threatfox_indicators
+
+
 @app.get("/indicators/live", tags=["live_from_threatfox"])
 def live_indicators():
     try:
@@ -24,6 +29,7 @@ def live_indicators():
         )
 
 from app.collector.validator import is_valid_public_ip
+
 
 @app.get("/indicators/validated", tags=["Validated IPs"])
 def validated_indicators():

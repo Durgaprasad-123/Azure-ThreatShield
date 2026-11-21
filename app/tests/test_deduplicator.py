@@ -1,5 +1,6 @@
 from app.collector.deduplicator import remove_duplicates
 
+
 def test_duplicate_indicators():
     indicators = [
         {
