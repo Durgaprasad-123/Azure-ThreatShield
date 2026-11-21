@@ -1,0 +1,66 @@
+[1mdiff --git a/pipeline.yml b/pipeline.yml[m
+[1mdeleted file mode 100644[m
+[1mindex ca0cce8..0000000[m
+[1m--- a/pipeline.yml[m
+[1m+++ /dev/null[m
+[36m@@ -1,59 +0,0 @@[m
+[31m-trigger:[m
+[31m-  branches:[m
+[31m-    include:[m
+[31m-      - main[m
+[31m-pool:[m
+[31m-  vmImage: 'ubuntu-latest'[m
+[31m-[m
+[31m-resources:[m
+[31m-  - repository: githubrepo[m
+[31m-    type: github[m
+[31m-    name: your-repo-org/your-repo-name[m
+[31m-    endpoint: github-service-connection[m
+[31m-[m
+[31m-stages:[m
+[31m-  - stage: Validation[m
+[31m-    displayName: 'Validation Stage'[m
+[31m-    jobs:[m
+[31m-      - job: Validate[m
+[31m-        displayName: 'Validate Python, Terraform and Kubernetes'[m
+[31m-        steps:[m
+[31m-        - checkout: githubrepo[m
+[31m-          clean: true[m
+[31m-        [m
+[31m-        #python validation[m
+[31m-        - task: UsePythonVersion@0[m
+[31m-          inputs:[m
+[31m-            versionSpec: '3.x'[m
+[31m-            addToPath: true[m
+[31m-[m
+[31m-            -script|[m
+[31m-              cd app[m
+[31m-              python -m pip install --upgrade pip[m
+[31m-              pip install -r requirements.txt[m
+[31m-              python -m unittest discover -s tests [m
+[31m-              pytest pytest-cov ruff[m
+[31m-              ruff check app --select ALL[m
+[31m-              python -m pytest tests/ \[m
+[31m-              --cov=app \[m
+[31m-              --cov-report=xml[m
+[31m-            [m
+[31m-        #terraform validation[m
+[31m-        - task: TerraformInstaller@1[m
+[31m-          inputs:[m
+[31m-            terraformVersion: '1.5.7' [m
+[31m-          script: |[m
+[31m-            cd terraform[m
+[31m-            terraform init[m
+[31m-            terraform validate[m
+[31m-            terraform fmt -check[m
+[31m-            checkov --config-file checkov.yaml --directory . -o terraform_report.json [m
+[31m-[m
+[31m-        #kubernetes validation[m
+[31m-        - task: KubectlInstaller@0  [m
+[31m-          inputs:[m
+[31m-            kubectlVersion: 'latest'[m
+[31m-          script: |[m
+[31m-            cd k8s[m
+[31m-            kubectl apply --dry-run=client -f . [m
+[31m-            kubeval --strict --exit-on-error --kubernetes-version="1.24.0" .[m
+\ No newline at end of file[m
