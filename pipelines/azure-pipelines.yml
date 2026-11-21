@@ -29,10 +29,10 @@ stages:
                getent hosts files.pythonhosted.org
 
                echo "Checking PyPI HTTPS connectivity"
-               curl -IL --connect-timeout 10 --max-time 20 https://pypi.org/simple/annotated-doc/
+               curl -IL --connect-timeout 10 --max-time 20 https://pypi.org/simple/annotated-doc/ || true
 
                echo "Checking package hosting HTTPS connectivity"
-               curl -I --connect-timeout 10 --max-time 20 https://files.pythonhosted.org/
+               curl -I --connect-timeout 10 --max-time 20 https://files.pythonhosted.org/ || true
                displayName: 'Diagnose PyPI Connectivity'
           - script: |
               set -e
