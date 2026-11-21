@@ -27,8 +27,8 @@ stages:
           - script: |
               python -m pip install --upgrade pip
               python -m pip install -r requirements.txt
-              python -m pip install pytest pytest-cov ruff
-            displayName: 'Install Dependencies'
+              python -m pip install --timeout 60 --retires 5 ruff
+            displayName: 'Install dependencies'
 
           - script: |
               python -m pytest
