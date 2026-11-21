@@ -1,0 +1,7 @@
+IGNORE Git metadata
+IGNORE Python virtual environments
+IGNORE Python cache directories
+IGNORE compiled Python files
+IGNORE environment secret files
+IGNORE test cache
+IGNORE IDE settings
