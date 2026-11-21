@@ -1,15 +1,13 @@
-from fastapi import (
-    FastAPI,  #it imports the FastAPI Class from the fastapi package
-    HTTPException,
-)
+from fastapi import FastAPI, HTTPException
 
 from app.collector.deduplicator import remove_duplicates
+from app.collector.threatfox import fetch_threatfox_indicators
+from app.collector.validator import is_valid_public_ip
 
 app = FastAPI()
 @app.get("/health", tags=["Health Check"])
 def health():
     return { "status": "healthy", "service": "Azure-threatshield"}
-from app.collector.threatfox import fetch_threatfox_indicators
 
 
 @app.get("/indicators/live", tags=["live_from_threatfox"])
@@ -22,13 +20,12 @@ def live_indicators():
             "indicators": indicators
         }
 
-    except Exception:
+    except (RuntimeError, TypeError) as exc:
         raise HTTPException(
             status_code=503,
             detail="ThreatFox API is currently unavailable"
-        )
+        )from exc
 
-from app.collector.validator import is_valid_public_ip
 
 
 @app.get("/indicators/validated", tags=["Validated IPs"])
@@ -48,8 +45,8 @@ def validated_indicators():
             "indicators": unique_indicators
             }
 
-    except Exception:
+    except (RuntimeError,TypeError) as exc:
         raise HTTPException(
             status_code=503,
             detail="ThreatFox indicators could not be processed"
-        )
+        ) from exc
