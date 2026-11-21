@@ -46,7 +46,7 @@ def fetch_threatfox_indicators():
 
     # Validate API response
     if not isinstance(data, dict):
-        raise RuntimeError("Unexpected ThreatFox response format")
+        raise TypeError("Unexpected ThreatFox response format")
 
     if data.get("query_status") != "ok":
         raise RuntimeError(
@@ -54,7 +54,7 @@ def fetch_threatfox_indicators():
         )
 
     if not isinstance(data.get("data"), list):
-        raise RuntimeError("ThreatFox returned unexpected data format")
+        raise TypeError("ThreatFox returned unexpected data format")
 
     indicators = []
 
