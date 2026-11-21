@@ -24,16 +24,12 @@ stages:
               versionSpec: '3.12'
               addToPath: true
           - script: |
-               echo "Checking DNS resolution"
-               getent hosts pypi.org
-               getent hosts files.pythonhosted.org
+              echo "Checking PyPI connectivity"
+              curl -I --connect-timeout 10 --max-time 20 https://pypi.org/simple/annotated-doc/ || true
 
-               echo "Checking PyPI HTTPS connectivity"
-               curl -IL --connect-timeout 10 --max-time 20 https://pypi.org/simple/annotated-doc/ || true
-
-               echo "Checking package hosting HTTPS connectivity"
-               curl -I --connect-timeout 10 --max-time 20 https://files.pythonhosted.org/ || true
-               displayName: 'Diagnose PyPI Connectivity'
+              echo "Checking package hosting connectivity"
+              curl -I --connect-timeout 10 --max-time 20 https://files.pythonhosted.org/ || true
+            displayName: 'Diagnose PyPI Connectivity'
           - script: |
               set -e
               python -m pip --version
