@@ -25,9 +25,11 @@ stages:
               addToPath: true
 
           - script: |
-              python -m pip install --upgrade pip
-              python -m pip install -r requirements.txt
-              python -m pip install --timeout 60 --retries 5 ruff
+              set -e
+              python -m pip --version
+              python -m pip install --timeout 30 --retries 2 -r requirements.txt
+              python -m pip install --timeout 30 --retries 2 ruff
+              ruff --version
             displayName: 'Install dependencies'
 
           - script: |
