@@ -13,12 +13,21 @@ variables:
   PIP_RETRIES: '10'
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
 
+  terraformWorkingDirectory: 'infra/terraform'
+
+  imageName: 'azure-threatshield'
+  imageTag: '$(Build.BuildId)'
+
 stages:
+
+
   - stage: Validation
     displayName: 'Code Validation'
+
     jobs:
       - job: PythonValidation
         displayName: 'Validate Python Application'
+
         steps:
           - checkout: self
             clean: true
@@ -39,38 +48,193 @@ stages:
 
           - script: |
               set -e
+
               python -m pip --version
               python -m pip install -r requirements.txt ruff==0.17.6
               ruff --version
             displayName: 'Install dependencies'
             retryCountOnTaskFailure: 3
 
-          - script: python -m pytest
+          - script: |
+              python -m pytest
             displayName: 'Run Unit Tests'
 
-          - script: ruff check app
+          - script: |
+              ruff check app
             displayName: 'Run Ruff Linting'
 
-  - stage: DockerBuild
-    displayName: 'Docker Image Build'
+
+
+  - stage: Terraform
+    displayName: 'Terraform Validation'
     dependsOn: Validation
     condition: succeeded()
+
     jobs:
-      - job: BuildImage
-        displayName: 'Build FastAPI Container'
+      - job: CheckFormat
+        displayName: 'Check formatting and configuration'
+
         steps:
           - checkout: self
 
-          - task: Docker@2
-            displayName: 'Build Azurethreat Image'
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: '1.15.7'
+
+          - script: |
+              set -e
+
+              terraform version
+
+              terraform fmt \
+                -check \
+                -recursive \
+                -diff
+
+              terraform init \
+                -backend=false \
+                -input=false
+
+              terraform validate
+            displayName: 'Terraform fmt, init, validate'
+            workingDirectory: $(terraformWorkingDirectory)
+
+
+
+  - stage: IacSecurity
+    displayName: 'Scan Terraform for Security Misconfigurations'
+    dependsOn: Terraform
+    condition: succeeded()
+
+    jobs:
+      - job: Checkov
+        displayName: 'Scan Terraform with Checkov'
+
+        steps:
+          - checkout: self
+
+          - task: UsePythonVersion@0
+            displayName: 'Set up Python'
+            inputs:
+              versionSpec: '3.12'
+
+          - script: |
+              set -e
+
+              python -m pip install checkov==3.4.6
+              checkov --version
+            displayName: 'Install Checkov'
             retryCountOnTaskFailure: 2
+
+          - script: |
+              checkov \
+                --directory $(terraformWorkingDirectory) \
+                --framework terraform \
+                --output cli \
+                --output junitxml \
+                --output-file-path console,$(Common.TestResultsDirectory) \
+                --soft-fail
+            displayName: 'Run Checkov Scan'
+
+          - task: PublishTestResults@2
+            displayName: 'Publish Checkov Results'
+            condition: succeededOrFailed()
+
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '$(Common.TestResultsDirectory)/results_junitxml.xml'
+              testRunTitle: 'Checkov IaC Scan'
+              failTaskOnFailedTests: false
+
+
+
+  - stage: DockerBuild
+    displayName: 'Docker Build and Container Scan'
+    dependsOn: IacSecurity
+    condition: succeeded()
+
+    jobs:
+      - job: BuildImage
+        displayName: 'Build and Scan FastAPI Container'
+
+        steps:
+          - checkout: self
+
+
+          - task: Docker@2
+            displayName: 'Build Azure ThreatShield Image'
+            retryCountOnTaskFailure: 2
+
             inputs:
               command: 'build'
-              repository: 'azure-threatshield'
+              repository: '$(imageName)'
               Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
               buildContext: '$(Build.SourcesDirectory)'
-              tags: |
-                $(Build.BuildId)
 
-          - script: docker images azure-threatshield
+              tags: |
+                $(imageTag)
+
+
+          - script: |
+              set -e
+
+              docker images $(imageName)
+              docker image inspect $(imageName):$(imageTag) > /dev/null
             displayName: 'Verify Docker Image'
+
+          - script: |
+              set -e
+
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq wget gnupg
+
+              wget -qO - \
+                https://aquasecurity.github.io/trivy-repo/deb/public.key \
+                | gpg --dearmor \
+                | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+
+              echo \
+                "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+                | sudo tee /etc/apt/sources.list.d/trivy.list
+
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq trivy
+
+              trivy --version
+            displayName: 'Install Trivy'
+            retryCountOnTaskFailure: 2
+
+          - script: |
+              set -e
+
+              trivy image \
+                --scanners vuln \
+                --exit-code 0 \
+                --format template \
+                --template "@contrib/junit.tpl" \
+                --output $(Common.TestResultsDirectory)/trivy-results.xml \
+                $(imageName):$(imageTag)
+            displayName: 'Trivy Scan - Generate Report'
+
+          - script: |
+              set -e
+
+              trivy image \
+                --scanners vuln \
+                --severity CRITICAL \
+                --ignore-unfixed \
+                --exit-code 1 \
+                --skip-db-update \
+                $(imageName):$(imageTag)
+            displayName: 'Trivy Scan - Gate on CRITICAL'
+
+          - task: PublishTestResults@2
+            displayName: 'Publish Trivy Results'
+            condition: succeededOrFailed()
+
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '$(Common.TestResultsDirectory)/trivy-results.xml'
+              testRunTitle: 'Trivy Container Scan'
+              failTaskOnFailedTests: false
