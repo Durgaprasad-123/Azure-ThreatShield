@@ -20,7 +20,6 @@ variables:
 
 stages:
 
-
   - stage: Validation
     displayName: 'Code Validation'
 
@@ -64,7 +63,6 @@ stages:
             displayName: 'Run Ruff Linting'
 
 
-
   - stage: Terraform
     displayName: 'Terraform Validation'
     dependsOn: Validation
@@ -72,25 +70,32 @@ stages:
 
     jobs:
       - job: CheckFormat
-        displayName: 'Check formatting and configuration'
+        displayName: 'Check Terraform Formatting and Configuration'
 
         steps:
           - checkout: self
 
-          - task: TerraformInstaller@1
+          - script: |
+              set -e
+
+              TERRAFORM_VERSION="1.15.7"
+
+              echo "Installing Terraform ${TERRAFORM_VERSION}"
+
+              curl -fsSLo terraform.zip \
+                "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+
+              unzip -o terraform.zip
+
+              sudo mv terraform /usr/local/bin/terraform
+
+              terraform version
             displayName: 'Install Terraform'
-            inputs:
-              terraformVersion: '1.15.7'
 
           - script: |
               set -e
 
-              terraform version
-
-              terraform fmt \
-                -check \
-                -recursive \
-                -diff
+              terraform fmt -check -recursive -diff
 
               terraform init \
                 -backend=false \
@@ -99,7 +104,6 @@ stages:
               terraform validate
             displayName: 'Terraform fmt, init, validate'
             workingDirectory: $(terraformWorkingDirectory)
-
 
 
   - stage: IacSecurity
@@ -119,13 +123,16 @@ stages:
             inputs:
               versionSpec: '3.12'
 
+
           - script: |
               set -e
 
               python -m pip install checkov==3.4.6
+
               checkov --version
             displayName: 'Install Checkov'
             retryCountOnTaskFailure: 2
+
 
           - script: |
               checkov \
@@ -137,16 +144,15 @@ stages:
                 --soft-fail
             displayName: 'Run Checkov Scan'
 
+
           - task: PublishTestResults@2
             displayName: 'Publish Checkov Results'
             condition: succeededOrFailed()
-
             inputs:
               testResultsFormat: 'JUnit'
               testResultsFiles: '$(Common.TestResultsDirectory)/results_junitxml.xml'
               testRunTitle: 'Checkov IaC Scan'
               failTaskOnFailedTests: false
-
 
 
   - stage: DockerBuild
@@ -165,13 +171,11 @@ stages:
           - task: Docker@2
             displayName: 'Build Azure ThreatShield Image'
             retryCountOnTaskFailure: 2
-
             inputs:
               command: 'build'
               repository: '$(imageName)'
               Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
               buildContext: '$(Build.SourcesDirectory)'
-
               tags: |
                 $(imageTag)
 
@@ -180,30 +184,40 @@ stages:
               set -e
 
               docker images $(imageName)
-              docker image inspect $(imageName):$(imageTag) > /dev/null
+
+              docker image inspect \
+                $(imageName):$(imageTag) \
+                > /dev/null
             displayName: 'Verify Docker Image'
+
 
           - script: |
               set -e
 
               sudo apt-get update -qq
-              sudo apt-get install -y -qq wget gnupg
+
+              sudo apt-get install -y -qq \
+                wget \
+                gnupg
 
               wget -qO - \
                 https://aquasecurity.github.io/trivy-repo/deb/public.key \
                 | gpg --dearmor \
-                | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+                | sudo tee /usr/share/keyrings/trivy.gpg \
+                > /dev/null
 
               echo \
                 "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
                 | sudo tee /etc/apt/sources.list.d/trivy.list
 
               sudo apt-get update -qq
+
               sudo apt-get install -y -qq trivy
 
               trivy --version
             displayName: 'Install Trivy'
             retryCountOnTaskFailure: 2
+
 
           - script: |
               set -e
@@ -217,6 +231,7 @@ stages:
                 $(imageName):$(imageTag)
             displayName: 'Trivy Scan - Generate Report'
 
+
           - script: |
               set -e
 
@@ -229,10 +244,10 @@ stages:
                 $(imageName):$(imageTag)
             displayName: 'Trivy Scan - Gate on CRITICAL'
 
+
           - task: PublishTestResults@2
             displayName: 'Publish Trivy Results'
             condition: succeededOrFailed()
-
             inputs:
               testResultsFormat: 'JUnit'
               testResultsFiles: '$(Common.TestResultsDirectory)/trivy-results.xml'
