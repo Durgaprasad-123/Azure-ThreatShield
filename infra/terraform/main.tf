@@ -110,3 +110,8 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
 
   skip_service_principal_aad_check = true
 }
+
+resource "azurerm_subnet_network_security_group_association" "aks" {
+  subnet_id                 = module.vnet.aks_subnet_id
+  network_security_group_id = module.nsg.nsg_id
+}
