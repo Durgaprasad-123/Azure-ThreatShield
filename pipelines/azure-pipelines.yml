@@ -53,7 +53,8 @@ stages:
 
   - stage: DockerBuild
     displayName: 'Docker Image Build'
-    dependsOn: []
+    dependsOn: Validation
+    condition: succeeded[]
     jobs:
       - job: BuildImage
         displayName: 'Build FastAPI Container'
