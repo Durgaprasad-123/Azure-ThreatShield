@@ -1,4 +1,3 @@
-
 trigger:
   branches:
     include:
@@ -7,6 +6,12 @@ trigger:
 
 pool:
   vmImage: 'ubuntu-latest'
+
+variables:
+  PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip-cache
+  PIP_DEFAULT_TIMEOUT: '120'
+  PIP_RETRIES: '10'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
 
 stages:
   - stage: Validation
@@ -23,49 +28,48 @@ stages:
             inputs:
               versionSpec: '3.12'
               addToPath: true
-          - script: |
-              echo "Checking PyPI connectivity"
-              curl -I --connect-timeout 10 --max-time 20 https://pypi.org/simple/annotated-doc/ || true
 
-              echo "Checking package hosting connectivity"
-              curl -I --connect-timeout 10 --max-time 20 https://files.pythonhosted.org/ || true
-            displayName: 'Diagnose PyPI Connectivity'
+          - task: Cache@2
+            displayName: 'Cache pip'
+            inputs:
+              key: 'pip | "$(Agent.OS)" | requirements.txt'
+              restoreKeys: |
+                pip | "$(Agent.OS)"
+              path: $(PIP_CACHE_DIR)
+
           - script: |
               set -e
               python -m pip --version
-              python -m pip install --timeout 30 --retries 2 -r requirements.txt
-              python -m pip install --timeout 30 --retries 2 ruff==0.17.6
+              python -m pip install -r requirements.txt ruff==0.17.6
               ruff --version
             displayName: 'Install dependencies'
+            retryCountOnTaskFailure: 3
 
-          - script: |
-              python -m pytest
+          - script: python -m pytest
             displayName: 'Run Unit Tests'
 
-          - script: |
-              ruff check app
+          - script: ruff check app
             displayName: 'Run Ruff Linting'
 
   - stage: DockerBuild
     displayName: 'Docker Image Build'
     dependsOn: []
-
     jobs:
       - job: BuildImage
-        displayName: 'Build FastApi Container'
-
+        displayName: 'Build FastAPI Container'
         steps:
           - checkout: self
-          - task:  Docker@2
+
+          - task: Docker@2
             displayName: 'Build Azurethreat Image'
+            retryCountOnTaskFailure: 2
             inputs:
               command: 'build'
               repository: 'azure-threatshield'
               Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
-              buildcontext: '$(Build.SourcesDirectory)'
+              buildContext: '$(Build.SourcesDirectory)'
               tags: |
                 $(Build.BuildId)
-          
-          - script: |
-              docker images azure-threatshield
-              displayName: 'Verify Docker Image'
+
+          - script: docker images azure-threatshield
+            displayName: 'Verify Docker Image'
