@@ -34,7 +34,7 @@ stages:
               set -e
               python -m pip --version
               python -m pip install --timeout 30 --retries 2 -r requirements.txt
-              python -m pip install --timeout 30 --retries 2 ruff
+              python -m pip install --timeout 30 --retries 2 ruff==0.17.6
               ruff --version
             displayName: 'Install dependencies'
 
