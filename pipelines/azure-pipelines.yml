@@ -61,7 +61,7 @@ stages:
             inputs:
               command: 'build'
               repository: 'azure-threatshield'
-              Dockerfile: '$(Build.SorcesDirectory)/Dockerfile'
+              Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
               buildcontext: '$(Build.SourcesDirectory)'
               tags: |
                 $(Build.BuildId)
