@@ -45,3 +45,27 @@ stages:
           - script: |
               ruff check app
             displayName: 'Run Ruff Linting'
+
+  - stage: DockerBuild
+    displayName: 'Docker Image Build'
+    dependsOn: []
+
+    jobs:
+      - job: BuildImage
+        displayName: 'Build FastApi Container'
+
+        steps:
+          - checkout: self
+          - task:  Docker@2
+            displayName: 'Build Azurethreat Image'
+            inputs:
+            command: 'build'
+            repository: 'azure-threatshield'
+            Dockerfile: '$(Build.SorcesDirectory)/Dockerfile'
+            buildcontext: '$(Build.SourcesDirectory)'
+            tags: |
+              $(Build.BuildId)
+          
+          - script: |
+              docker images azure-threatshield
+              displayName: 'Verify Docker Image'
