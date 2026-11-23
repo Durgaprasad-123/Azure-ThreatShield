@@ -47,7 +47,6 @@ stages:
 
           - script: |
               set -e
-
               python -m pip --version
               python -m pip install -r requirements.txt ruff==0.17.6
               ruff --version
@@ -55,10 +54,12 @@ stages:
             retryCountOnTaskFailure: 3
 
           - script: |
+              set -e
               python -m pytest
             displayName: 'Run Unit Tests'
 
           - script: |
+              set -e
               ruff check app
             displayName: 'Run Ruff Linting'
 
@@ -86,7 +87,6 @@ stages:
                 "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
 
               unzip -o terraform.zip
-
               sudo mv terraform /usr/local/bin/terraform
 
               terraform version
@@ -122,19 +122,19 @@ stages:
             displayName: 'Set up Python'
             inputs:
               versionSpec: '3.12'
-
+              addToPath: true
 
           - script: |
               set -e
 
               python -m pip install checkov==3.4.6
-
               checkov --version
             displayName: 'Install Checkov'
             retryCountOnTaskFailure: 2
 
-
           - script: |
+              set -e
+
               checkov \
                 --directory $(terraformWorkingDirectory) \
                 --framework terraform \
@@ -144,7 +144,6 @@ stages:
                 --soft-fail
             displayName: 'Run Checkov Scan'
 
-
           - task: PublishTestResults@2
             displayName: 'Publish Checkov Results'
             condition: succeededOrFailed()
@@ -153,6 +152,7 @@ stages:
               testResultsFiles: '$(Common.TestResultsDirectory)/results_junitxml.xml'
               testRunTitle: 'Checkov IaC Scan'
               failTaskOnFailedTests: false
+
 
 
   - stage: DockerBuild
@@ -167,7 +167,6 @@ stages:
         steps:
           - checkout: self
 
-
           - task: Docker@2
             displayName: 'Build Azure ThreatShield Image'
             retryCountOnTaskFailure: 2
@@ -178,7 +177,6 @@ stages:
               buildContext: '$(Build.SourcesDirectory)'
               tags: |
                 $(imageTag)
-
 
           - script: |
               set -e
@@ -211,7 +209,6 @@ stages:
                 | sudo tee /etc/apt/sources.list.d/trivy.list
 
               sudo apt-get update -qq
-
               sudo apt-get install -y -qq trivy
 
               trivy --version
@@ -222,11 +219,27 @@ stages:
           - script: |
               set -e
 
+              mkdir -p $(Pipeline.Workspace)/trivy-templates
+
+              wget -q \
+                https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl \
+                -O $(Pipeline.Workspace)/trivy-templates/junit.tpl
+
+              test -f $(Pipeline.Workspace)/trivy-templates/junit.tpl
+
+              echo "Trivy JUnit template downloaded successfully"
+            displayName: 'Download Trivy JUnit Template'
+
+
+
+          - script: |
+              set -e
+
               trivy image \
                 --scanners vuln \
                 --exit-code 0 \
                 --format template \
-                --template "@contrib/junit.tpl" \
+                --template "@$(Pipeline.Workspace)/trivy-templates/junit.tpl" \
                 --output $(Common.TestResultsDirectory)/trivy-results.xml \
                 $(imageName):$(imageTag)
             displayName: 'Trivy Scan - Generate Report'
@@ -243,7 +256,6 @@ stages:
                 --skip-db-update \
                 $(imageName):$(imageTag)
             displayName: 'Trivy Scan - Gate on CRITICAL'
-
 
           - task: PublishTestResults@2
             displayName: 'Publish Trivy Results'
