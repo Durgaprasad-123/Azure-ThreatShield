@@ -26,6 +26,7 @@ stages:
     jobs:
       - job: PythonValidation
         displayName: 'Validate Python Application'
+        timeoutInMinutes: 20
 
         steps:
           - checkout: self
@@ -46,12 +47,17 @@ stages:
               path: $(PIP_CACHE_DIR)
 
           - script: |
-              set -e
-              python -m pip --version
-              python -m pip install -r requirements.txt ruff==0.17.6
+              set -euxo pipefail
+              python -m pip install --upgrade pip setuptools wheel
+              python -m pip install --prefer-binary --progress-bar off \
+                -r requirements.txt ruff
+              python -m pip check
               ruff --version
             displayName: 'Install dependencies'
-            retryCountOnTaskFailure: 3
+            timeoutInMinutes: 10
+            env:
+              PIP_DEFAULT_TIMEOUT: '30'
+              PIP_RETRIES: '3'
 
           - script: |
               set -e
@@ -154,7 +160,6 @@ stages:
               failTaskOnFailedTests: false
 
 
-
   - stage: DockerBuild
     displayName: 'Docker Build and Container Scan'
     dependsOn: IacSecurity
@@ -188,7 +193,6 @@ stages:
                 > /dev/null
             displayName: 'Verify Docker Image'
 
-
           - script: |
               set -e
 
@@ -215,7 +219,6 @@ stages:
             displayName: 'Install Trivy'
             retryCountOnTaskFailure: 2
 
-
           - script: |
               set -e
 
@@ -230,8 +233,6 @@ stages:
               echo "Trivy JUnit template downloaded successfully"
             displayName: 'Download Trivy JUnit Template'
 
-
-
           - script: |
               set -e
 
@@ -243,7 +244,6 @@ stages:
                 --output $(Common.TestResultsDirectory)/trivy-results.xml \
                 $(imageName):$(imageTag)
             displayName: 'Trivy Scan - Generate Report'
-
 
           - script: |
               set -e
@@ -265,3 +265,68 @@ stages:
               testResultsFiles: '$(Common.TestResultsDirectory)/trivy-results.xml'
               testRunTitle: 'Trivy Container Scan'
               failTaskOnFailedTests: false
+
+          - script: |
+              set -e
+              docker save $(imageName):$(imageTag) -o $(Build.ArtifactStagingDirectory)/image.tar
+              ls -lh $(Build.ArtifactStagingDirectory)/image.tar
+            displayName: 'Save Image to Tarball'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Image Artifact'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/image.tar'
+              artifact: 'threatshield-image'
+
+
+  - stage: AcrPush
+    displayName: 'Push Image to ACR'
+    dependsOn: DockerBuild
+    condition: succeeded()
+
+    jobs:
+      - job: PushToAcr
+        displayName: 'Push ThreatShield Image to ACR'
+
+        steps:
+          - checkout: none
+
+          - download: current
+            artifact: 'threatshield-image'
+            displayName: 'Download Image Artifact'
+
+          - script: |
+              set -e
+              docker load -i $(Pipeline.Workspace)/threatshield-image/image.tar
+              docker images $(imageName)
+            displayName: 'Load Image'
+
+          - task: AzureCLI@2
+            displayName: 'Push ThreatShield Image to ACR'
+            condition: succeeded()
+            inputs:
+              azureSubscription: 'YOUR-AZURE-SERVICE-CONNECTION'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+
+                ACR_NAME="acrthreatshieldprasad26"
+                IMAGE="$(imageName)"
+                TAG="$(imageTag)"
+
+                az acr login --name "$ACR_NAME"
+
+                ACR_LOGIN_SERVER=$(az acr show \
+                  --name "$ACR_NAME" \
+                  --query loginServer \
+                  -o tsv)
+
+                docker tag \
+                  "$IMAGE:$TAG" \
+                  "$ACR_LOGIN_SERVER/$IMAGE:$TAG"
+
+                docker push \
+                  "$ACR_LOGIN_SERVER/$IMAGE:$TAG"
+
+                echo "Image pushed to ACR successfully"
