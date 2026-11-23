@@ -1,0 +1,27 @@
+trigger: none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+  - task: UsePythonVersion@0
+    displayName: 'Set up Python'
+    inputs:
+      versionSpec: '3.12'
+      addToPath: true
+
+  - script: |
+      echo "===== Agent / network info ====="
+      echo "HTTPS_PROXY=$HTTPS_PROXY  HTTP_PROXY=$HTTP_PROXY  NO_PROXY=$NO_PROXY"
+      echo "Hostname: $(hostname)"
+      echo
+      echo "===== curl pypi.org ====="
+      curl -sSvI https://pypi.org/simple/ 2>&1 | head -20 || true
+      echo
+      echo "===== curl files.pythonhosted.org ====="
+      curl -sSvI https://files.pythonhosted.org 2>&1 | head -20 || true
+      echo
+      echo "===== pip install test (ruff only) ====="
+      python -m pip install --disable-pip-version-check --timeout 30 --retries 2 ruff 2>&1 | tail -20 || true
+    displayName: 'Network diagnostic'
+    timeoutInMinutes: 5
