@@ -305,7 +305,7 @@ stages:
             displayName: 'Push ThreatShield Image to ACR'
             condition: succeeded()
             inputs:
-              azureSubscription: 'YOUR-AZURE-SERVICE-CONNECTION'
+              azureSubscription: 'threatshield-azure'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
