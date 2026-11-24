@@ -265,6 +265,16 @@ stages:
 
                 # Terraform runs INSIDE the Azure task so it is authenticated
                 # against your subscription via the service connection.
+                - script: |
+                    set -e
+                    echo "OPENSSL_CONF=$OPENSSL_CONF"
+                    echo "=== default curl (uses the x25519 pin) ==="
+                    curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+                      https://login.microsoftonline.com/98c35e6d-024d-4cea-8a6c-7518ca8577f9/v2.0/.well-known/openid-configuration || echo "FAILED (default)"
+                    echo "=== forced x25519 curl ==="
+                    curl -sS --curves X25519 -o /dev/null -w "HTTP %{http_code}\n" \
+                      https://login.microsoftonline.com/98c35e6d-024d-4cea-8a6c-7518ca8577f9/v2.0/.well-known/openid-configuration || echo "FAILED (x25519)"
+                  displayName: 'Probe login endpoint'
                 - task: AzureCLI@2
                   displayName: 'Terraform init, plan, apply'
                   env:
