@@ -267,6 +267,8 @@ stages:
                 # against your subscription via the service connection.
                 - task: AzureCLI@2
                   displayName: 'Terraform init, plan, apply'
+                  env:
+                    OPENSSL_CONF: $(Agent.TempDirectory)/openssl-classic.cnf
                   inputs:
                     azureSubscription: 'threatshield-azure'
                     scriptType: 'bash'
@@ -275,12 +277,12 @@ stages:
                     inlineScript: |
                       set -euo pipefail
 
-                      # Real remote backend this time (NOT -backend=false),
-                      # so state persists and apply knows what already exists.
+                      echo "OPENSSL_CONF=$OPENSSL_CONF"
+                      echo "=== system curl to login endpoint ==="
+                      curl -sSI https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration | head -3
+
                       terraform init  -input=false
-
                       terraform plan  -input=false -out=tfplan
-
                       terraform apply -input=false -auto-approve tfplan
 
 
