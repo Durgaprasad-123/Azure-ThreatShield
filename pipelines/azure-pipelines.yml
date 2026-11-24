@@ -158,11 +158,51 @@ stages:
               testResultsFiles: '$(Common.TestResultsDirectory)/results_junitxml.xml'
               testRunTitle: 'Checkov IaC Scan'
               failTaskOnFailedTests: false
+  - stage: TerraformApply
+    displayName: 'Provision Infrastructure'
+    dependsOn: IacSecurity
+    condition: >-
+      and(succeeded(),
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    jobs:
+      - deployment: ApplyInfra
+        displayName: 'Terraform Apply'
+        environment: 'threatshield-prod'   # add an "Approvals" check on this environment
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+              
+                - script: |
+                    set -e
+                    TERRAFORM_VERSION="1.15.7"
+                    curl -fsSLo terraform.zip \
+                      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+                    unzip -o terraform.zip
+                    sudo mv terraform /usr/local/bin/terraform
+                    terraform version
+                  displayName: 'Install Terraform'
+                  
+                - task: AzureCLI@2
+                  displayName: 'Terraform init, plan, apply'
+                  inputs:
+                    azureSubscription: 'threatshield-azure'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    workingDirectory: $(terraformWorkingDirectory)
+                    inlineScript: |
+                      set -euo pipefail
+                      terraform init  -input=false            # real backend, NOT -backend=false
+                      terraform plan  -input=false -out=tfplan
+                      terraform apply -input=false -auto-approve tfplan
 
 
   - stage: DockerBuild
     displayName: 'Docker Build and Container Scan'
-    dependsOn: IacSecurity
+    dependsOn: TerraformApply
     condition: succeeded()
 
     jobs:
