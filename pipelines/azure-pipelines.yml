@@ -14,6 +14,7 @@ variables:
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
 
   terraformWorkingDirectory: 'infra/terraform'
+  terraformVersion: '1.15.7'
 
   imageName: 'azure-threatshield'
   imageTag: '$(Build.BuildId)'
@@ -46,18 +47,22 @@ stages:
                 pip | "$(Agent.OS)"
               path: $(PIP_CACHE_DIR)
 
+          # Resilient install: task-level retry handles transient PyPI/TLS
+          # drops, and the generous timeout/retry env values give pip room.
+          # (Dropped the pip self-upgrade — the agent already ships pip, and
+          # that line was the first thing to fail on a flaky connection.)
           - script: |
               set -euxo pipefail
-              python -m pip install --upgrade pip setuptools wheel
               python -m pip install --prefer-binary --progress-bar off \
                 -r requirements.txt ruff
               python -m pip check
               ruff --version
             displayName: 'Install dependencies'
-            timeoutInMinutes: 10
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 2
             env:
-              PIP_DEFAULT_TIMEOUT: '30'
-              PIP_RETRIES: '3'
+              PIP_DEFAULT_TIMEOUT: '120'
+              PIP_RETRIES: '10'
 
           - script: |
               set -e
@@ -85,8 +90,6 @@ stages:
           - script: |
               set -e
 
-              TERRAFORM_VERSION="1.15.7"
-
               echo "Installing Terraform ${TERRAFORM_VERSION}"
 
               curl -fsSLo terraform.zip \
@@ -97,6 +100,8 @@ stages:
 
               terraform version
             displayName: 'Install Terraform'
+            env:
+              TERRAFORM_VERSION: $(terraformVersion)
 
           - script: |
               set -e
@@ -158,9 +163,12 @@ stages:
               testResultsFiles: '$(Common.TestResultsDirectory)/results_junitxml.xml'
               testRunTitle: 'Checkov IaC Scan'
               failTaskOnFailedTests: false
+
+
   - stage: TerraformApply
     displayName: 'Provision Infrastructure'
     dependsOn: IacSecurity
+    # Only provision real infra from main — never from a feature branch.
     condition: >-
       and(succeeded(),
           eq(variables['Build.SourceBranch'], 'refs/heads/main'))
@@ -168,24 +176,35 @@ stages:
     jobs:
       - deployment: ApplyInfra
         displayName: 'Terraform Apply'
-        environment: 'threatshield-prod'   # add an "Approvals" check on this environment
+        # Add an "Approvals" check on this environment in the Azure DevOps UI
+        # (Pipelines -> Environments -> threatshield-prod) so the run pauses
+        # for your review before anything is created or destroyed.
+        environment: 'threatshield-prod'
         strategy:
           runOnce:
             deploy:
               steps:
                 - checkout: self
 
-              
+                # Fresh VM each stage, so install Terraform again here.
                 - script: |
                     set -e
-                    TERRAFORM_VERSION="1.15.7"
+
+                    echo "Installing Terraform ${TERRAFORM_VERSION}"
+
                     curl -fsSLo terraform.zip \
                       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+
                     unzip -o terraform.zip
                     sudo mv terraform /usr/local/bin/terraform
+
                     terraform version
                   displayName: 'Install Terraform'
-                  
+                  env:
+                    TERRAFORM_VERSION: $(terraformVersion)
+
+                # Terraform runs INSIDE the Azure task so it is authenticated
+                # against your subscription via the service connection.
                 - task: AzureCLI@2
                   displayName: 'Terraform init, plan, apply'
                   inputs:
@@ -195,8 +214,13 @@ stages:
                     workingDirectory: $(terraformWorkingDirectory)
                     inlineScript: |
                       set -euo pipefail
-                      terraform init  -input=false            # real backend, NOT -backend=false
+
+                      # Real remote backend this time (NOT -backend=false),
+                      # so state persists and apply knows what already exists.
+                      terraform init  -input=false
+
                       terraform plan  -input=false -out=tfplan
+
                       terraform apply -input=false -auto-approve tfplan
 
 
