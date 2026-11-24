@@ -67,8 +67,6 @@ stages:
 
           # Resilient install: task-level retry handles transient PyPI/TLS
           # drops, and the generous timeout/retry env values give pip room.
-          # (Dropped the pip self-upgrade — the agent already ships pip, and
-          # that line was the first thing to fail on a flaky connection.)
           - script: |
               set -euxo pipefail
               python -m pip install --prefer-binary --progress-bar off \
@@ -217,7 +215,7 @@ stages:
     # Only provision real infra from main — never from a feature branch.
     condition: >-
       and(succeeded(),
-          eq(variables['Build.SourceBranch'], 'refs/heads/feature/integrate-threatshield'))
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'))
 
     jobs:
       - deployment: ApplyInfra
@@ -232,6 +230,10 @@ stages:
               steps:
                 - checkout: self
 
+                # The Azure CLI ships its OWN bundled OpenSSL, which still
+                # offers the post-quantum group and gets reset by the network.
+                # Here we also force TLS 1.2, which has no PQ group at all, and
+                # feed the config straight into the AzureCLI task below.
                 - script: |
                     set -e
                     cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
@@ -242,9 +244,10 @@ stages:
                     system_default = system_default_sect
                     [system_default_sect]
                     Groups = x25519
+                    MaxProtocol = TLSv1.2
                     EOF
                     echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-                  displayName: 'Pin classic TLS groups'
+                  displayName: 'Pin classic TLS groups (TLS 1.2)'
 
                 # Fresh VM each stage, so install Terraform again here.
                 - script: |
@@ -265,20 +268,13 @@ stages:
 
                 # Terraform runs INSIDE the Azure task so it is authenticated
                 # against your subscription via the service connection.
-                - script: |
-                    set -e
-                    echo "OPENSSL_CONF=$OPENSSL_CONF"
-                    echo "=== default curl (uses the x25519 pin) ==="
-                    curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
-                      https://login.microsoftonline.com/98c35e6d-024d-4cea-8a6c-7518ca8577f9/v2.0/.well-known/openid-configuration || echo "FAILED (default)"
-                    echo "=== forced x25519 curl ==="
-                    curl -sS --curves X25519 -o /dev/null -w "HTTP %{http_code}\n" \
-                      https://login.microsoftonline.com/98c35e6d-024d-4cea-8a6c-7518ca8577f9/v2.0/.well-known/openid-configuration || echo "FAILED (x25519)"
-                  displayName: 'Probe login endpoint'
+                # OPENSSL_CONF is passed explicitly so the task's internal
+                # `az login` uses the TLS 1.2 / x25519 config too.
                 - task: AzureCLI@2
                   displayName: 'Terraform init, plan, apply'
                   env:
                     OPENSSL_CONF: $(Agent.TempDirectory)/openssl-classic.cnf
+                    GODEBUG: 'tlsmlkem=0,tlskyber=0'
                   inputs:
                     azureSubscription: 'threatshield-azure'
                     scriptType: 'bash'
@@ -287,12 +283,12 @@ stages:
                     inlineScript: |
                       set -euo pipefail
 
-                      echo "OPENSSL_CONF=$OPENSSL_CONF"
-                      echo "=== system curl to login endpoint ==="
-                      curl -sSI https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration | head -3
-
+                      # Real remote backend this time (NOT -backend=false),
+                      # so state persists and apply knows what already exists.
                       terraform init  -input=false
+
                       terraform plan  -input=false -out=tfplan
+
                       terraform apply -input=false -auto-approve tfplan
 
 
@@ -451,9 +447,10 @@ stages:
               system_default = system_default_sect
               [system_default_sect]
               Groups = x25519
+              MaxProtocol = TLSv1.2
               EOF
               echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-            displayName: 'Pin classic TLS groups'
+            displayName: 'Pin classic TLS groups (TLS 1.2)'
 
           - download: current
             artifact: 'threatshield-image'
@@ -468,6 +465,8 @@ stages:
           - task: AzureCLI@2
             displayName: 'Push ThreatShield Image to ACR'
             condition: succeeded()
+            env:
+              OPENSSL_CONF: $(Agent.TempDirectory)/openssl-classic.cnf
             inputs:
               azureSubscription: 'threatshield-azure'
               scriptType: 'bash'
