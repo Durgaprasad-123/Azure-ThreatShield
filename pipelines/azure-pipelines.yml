@@ -33,6 +33,24 @@ stages:
           - checkout: self
             clean: true
 
+          # OpenSSL 3.5 on the hosted agent defaults to a post-quantum TLS
+          # group, producing an oversized ClientHello that a middlebox on the
+          # path drops (UNEXPECTED_EOF_WHILE_READING). Pinning the classic
+          # x25519 group shrinks the handshake. Exported to all later steps.
+          - script: |
+              set -e
+              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+              openssl_conf = openssl_init
+              [openssl_init]
+              ssl_conf = ssl_sect
+              [ssl_sect]
+              system_default = system_default_sect
+              [system_default_sect]
+              Groups = x25519
+              EOF
+              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
+            displayName: 'Pin classic TLS groups'
+
           - task: UsePythonVersion@0
             displayName: 'Set up Python'
             inputs:
@@ -89,6 +107,20 @@ stages:
 
           - script: |
               set -e
+              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+              openssl_conf = openssl_init
+              [openssl_init]
+              ssl_conf = ssl_sect
+              [ssl_sect]
+              system_default = system_default_sect
+              [system_default_sect]
+              Groups = x25519
+              EOF
+              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
+            displayName: 'Pin classic TLS groups'
+
+          - script: |
+              set -e
 
               echo "Installing Terraform ${TERRAFORM_VERSION}"
 
@@ -128,6 +160,20 @@ stages:
 
         steps:
           - checkout: self
+
+          - script: |
+              set -e
+              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+              openssl_conf = openssl_init
+              [openssl_init]
+              ssl_conf = ssl_sect
+              [ssl_sect]
+              system_default = system_default_sect
+              [system_default_sect]
+              Groups = x25519
+              EOF
+              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
+            displayName: 'Pin classic TLS groups'
 
           - task: UsePythonVersion@0
             displayName: 'Set up Python'
@@ -186,6 +232,20 @@ stages:
               steps:
                 - checkout: self
 
+                - script: |
+                    set -e
+                    cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+                    openssl_conf = openssl_init
+                    [openssl_init]
+                    ssl_conf = ssl_sect
+                    [ssl_sect]
+                    system_default = system_default_sect
+                    [system_default_sect]
+                    Groups = x25519
+                    EOF
+                    echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
+                  displayName: 'Pin classic TLS groups'
+
                 # Fresh VM each stage, so install Terraform again here.
                 - script: |
                     set -e
@@ -235,6 +295,20 @@ stages:
 
         steps:
           - checkout: self
+
+          - script: |
+              set -e
+              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+              openssl_conf = openssl_init
+              [openssl_init]
+              ssl_conf = ssl_sect
+              [ssl_sect]
+              system_default = system_default_sect
+              [system_default_sect]
+              Groups = x25519
+              EOF
+              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
+            displayName: 'Pin classic TLS groups'
 
           - task: Docker@2
             displayName: 'Build Azure ThreatShield Image'
@@ -354,6 +428,20 @@ stages:
 
         steps:
           - checkout: none
+
+          - script: |
+              set -e
+              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+              openssl_conf = openssl_init
+              [openssl_init]
+              ssl_conf = ssl_sect
+              [ssl_sect]
+              system_default = system_default_sect
+              [system_default_sect]
+              Groups = x25519
+              EOF
+              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
+            displayName: 'Pin classic TLS groups'
 
           - download: current
             artifact: 'threatshield-image'
