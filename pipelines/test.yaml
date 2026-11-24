@@ -11,17 +11,24 @@ steps:
       addToPath: true
 
   - script: |
-      echo "===== Agent / network info ====="
-      echo "HTTPS_PROXY=$HTTPS_PROXY  HTTP_PROXY=$HTTP_PROXY  NO_PROXY=$NO_PROXY"
-      echo "Hostname: $(hostname)"
-      echo
-      echo "===== curl pypi.org ====="
-      curl -sSvI https://pypi.org/simple/ 2>&1 | head -20 || true
-      echo
-      echo "===== curl files.pythonhosted.org ====="
-      curl -sSvI https://files.pythonhosted.org 2>&1 | head -20 || true
-      echo
-      echo "===== pip install test (ruff only) ====="
-      python -m pip install --disable-pip-version-check --timeout 30 --retries 2 ruff 2>&1 | tail -20 || true
-    displayName: 'Network diagnostic'
+      set -e
+      cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
+      openssl_conf = openssl_init
+      [openssl_init]
+      ssl_conf = ssl_sect
+      [ssl_sect]
+      system_default = system_default_sect
+      [system_default_sect]
+      Groups = x25519
+      EOF
+
+      export OPENSSL_CONF=$(Agent.TempDirectory)/openssl-classic.cnf
+
+      echo "===== curl test ====="
+      curl -sSI https://pypi.org/simple/ | head -5
+
+      echo "===== pip test ====="
+      python -m pip install --timeout 30 --retries 2 ruff
+      ruff --version
+    displayName: 'Test with classic TLS groups'
     timeoutInMinutes: 5
