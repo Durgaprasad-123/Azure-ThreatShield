@@ -215,7 +215,7 @@ stages:
     # Only provision real infra from main — never from a feature branch.
     condition: >-
       and(succeeded(),
-          eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+          eq(variables['Build.SourceBranch'], 'refs/heads/feature/integrate-threatshield'))
 
     jobs:
       - deployment: ApplyInfra
