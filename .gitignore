@@ -21,3 +21,5 @@ crash.log
 # Editor files
 .vscode/
 .idea/
+
+*.tfplan
