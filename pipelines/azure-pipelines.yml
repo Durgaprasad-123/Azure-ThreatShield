@@ -11,28 +11,19 @@ pool:
 
 variables:
 
-
   PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip-cache
   PIP_DEFAULT_TIMEOUT: '120'
   PIP_RETRIES: '10'
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
 
-
-
   terraformWorkingDirectory: 'infra/terraform'
   terraformVersion: '1.15.7'
 
-
-
   azureServiceConnection: 'threatshield-azure'
-
   acrName: 'acrthreatshieldprasad26'
-
-
 
   imageName: 'azure-threatshield'
   imageTag: '$(Build.BuildId)'
-
 
 
 stages:
@@ -47,10 +38,35 @@ stages:
 
         timeoutInMinutes: 20
 
+        variables:
+          OPENSSL_CONF: $(Pipeline.Workspace)/no-pq.cnf
+
         steps:
 
           - checkout: self
             clean: true
+
+
+          # Restore pre-OpenSSL-3.5 TLS behaviour: omit the X25519MLKEM768
+          # hybrid key share so the ClientHello stays under one packet and
+          # middleboxes stop dropping the handshake (UNEXPECTED_EOF).
+          - script: |
+              set -euo pipefail
+
+              cat > "$(Pipeline.Workspace)/no-pq.cnf" <<'EOF'
+              openssl_conf = openssl_init
+
+              [openssl_init]
+              ssl_conf = ssl_sect
+
+              [ssl_sect]
+              system_default = system_default_sect
+
+              [system_default_sect]
+              Groups = X25519:secp256r1:x448:secp521r1:secp384r1
+              EOF
+
+            displayName: 'Disable post-quantum TLS (fix ClientHello EOF)'
 
 
           - task: UsePythonVersion@0
@@ -128,9 +144,31 @@ stages:
       - job: TerraformValidation
         displayName: 'Validate Terraform Configuration'
 
+        variables:
+          OPENSSL_CONF: $(Pipeline.Workspace)/no-pq.cnf
+
         steps:
 
           - checkout: self
+
+
+          - script: |
+              set -euo pipefail
+
+              cat > "$(Pipeline.Workspace)/no-pq.cnf" <<'EOF'
+              openssl_conf = openssl_init
+
+              [openssl_init]
+              ssl_conf = ssl_sect
+
+              [ssl_sect]
+              system_default = system_default_sect
+
+              [system_default_sect]
+              Groups = X25519:secp256r1:x448:secp521r1:secp384r1
+              EOF
+
+            displayName: 'Disable post-quantum TLS (fix ClientHello EOF)'
 
 
           - script: |
@@ -183,9 +221,31 @@ stages:
       - job: Checkov
         displayName: 'Run Checkov'
 
+        variables:
+          OPENSSL_CONF: $(Pipeline.Workspace)/no-pq.cnf
+
         steps:
 
           - checkout: self
+
+
+          - script: |
+              set -euo pipefail
+
+              cat > "$(Pipeline.Workspace)/no-pq.cnf" <<'EOF'
+              openssl_conf = openssl_init
+
+              [openssl_init]
+              ssl_conf = ssl_sect
+
+              [ssl_sect]
+              system_default = system_default_sect
+
+              [system_default_sect]
+              Groups = X25519:secp256r1:x448:secp521r1:secp384r1
+              EOF
+
+            displayName: 'Disable post-quantum TLS (fix ClientHello EOF)'
 
 
           - task: UsePythonVersion@0
@@ -262,6 +322,9 @@ stages:
 
         environment: 'threatshield-dev'
 
+        variables:
+          OPENSSL_CONF: $(Pipeline.Workspace)/no-pq.cnf
+
         strategy:
 
           runOnce:
@@ -271,6 +334,25 @@ stages:
               steps:
 
                 - checkout: self
+
+
+                - script: |
+                    set -euo pipefail
+
+                    cat > "$(Pipeline.Workspace)/no-pq.cnf" <<'EOF'
+                    openssl_conf = openssl_init
+
+                    [openssl_init]
+                    ssl_conf = ssl_sect
+
+                    [ssl_sect]
+                    system_default = system_default_sect
+
+                    [system_default_sect]
+                    Groups = X25519:secp256r1:x448:secp521r1:secp384r1
+                    EOF
+
+                  displayName: 'Disable post-quantum TLS (fix ClientHello EOF)'
 
 
                 - script: |
@@ -352,9 +434,31 @@ stages:
       - job: BuildImage
         displayName: 'Build and Scan ThreatShield Image'
 
+        variables:
+          OPENSSL_CONF: $(Pipeline.Workspace)/no-pq.cnf
+
         steps:
 
           - checkout: self
+
+
+          - script: |
+              set -euo pipefail
+
+              cat > "$(Pipeline.Workspace)/no-pq.cnf" <<'EOF'
+              openssl_conf = openssl_init
+
+              [openssl_init]
+              ssl_conf = ssl_sect
+
+              [ssl_sect]
+              system_default = system_default_sect
+
+              [system_default_sect]
+              Groups = X25519:secp256r1:x448:secp521r1:secp384r1
+              EOF
+
+            displayName: 'Disable post-quantum TLS (fix ClientHello EOF)'
 
 
           - task: Docker@2
@@ -546,9 +650,31 @@ stages:
       - job: PushToAcr
         displayName: 'Push ThreatShield Image to ACR'
 
+        variables:
+          OPENSSL_CONF: $(Pipeline.Workspace)/no-pq.cnf
+
         steps:
 
           - checkout: none
+
+
+          - script: |
+              set -euo pipefail
+
+              cat > "$(Pipeline.Workspace)/no-pq.cnf" <<'EOF'
+              openssl_conf = openssl_init
+
+              [openssl_init]
+              ssl_conf = ssl_sect
+
+              [ssl_sect]
+              system_default = system_default_sect
+
+              [system_default_sect]
+              Groups = X25519:secp256r1:x448:secp521r1:secp384r1
+              EOF
+
+            displayName: 'Disable post-quantum TLS (fix ClientHello EOF)'
 
 
           - download: current
