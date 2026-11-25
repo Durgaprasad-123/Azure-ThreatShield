@@ -251,9 +251,6 @@ stages:
 
                 - task: AzureCLI@2
                   displayName: 'Terraform init, plan, apply'
-                  env:
-                    OPENSSL_CONF: $(Agent.TempDirectory)/openssl-classic.cnf
-                    GODEBUG: 'tlsmlkem=0,tlskyber=0'
                   inputs:
                     azureSubscription: 'threatshield-azure'
                     scriptType: 'bash'
@@ -261,8 +258,11 @@ stages:
                     workingDirectory: $(terraformWorkingDirectory)
                     inlineScript: |
                       set -euo pipefail
-                      terraform init  -input=false
-                      terraform plan  -input=false -out=tfplan
+
+                      az account show --output table
+
+                      terraform init -input=false
+                      terraform plan -input=false -out=tfplan
                       terraform apply -input=false -auto-approve tfplan
 
 
