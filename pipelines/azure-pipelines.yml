@@ -271,13 +271,23 @@ stages:
           - script: |
               set -euo pipefail
 
+              mkdir -p "$(Common.TestResultsDirectory)"
+
+              # Human-readable output in the build log
               checkov \
                 --directory $(terraformWorkingDirectory) \
                 --framework terraform \
                 --output cli \
-                --output junitxml \
-                --output-file-path console,$(Common.TestResultsDirectory) \
+                --compact \
                 --soft-fail
+
+              # JUnit XML written to an explicit FILE (not a directory)
+              checkov \
+                --directory $(terraformWorkingDirectory) \
+                --framework terraform \
+                --output junitxml \
+                --soft-fail \
+                > "$(Common.TestResultsDirectory)/checkov-results.xml"
 
             displayName: 'Run Checkov Scan'
 
@@ -291,7 +301,7 @@ stages:
               testResultsFormat: 'JUnit'
 
               testResultsFiles: |
-                $(Common.TestResultsDirectory)/results_junitxml.xml
+                $(Common.TestResultsDirectory)/checkov-results.xml.xml
 
               testRunTitle: 'Checkov IaC Security Scan'
 
