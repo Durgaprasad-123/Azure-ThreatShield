@@ -405,6 +405,10 @@ stages:
                         --query "{Subscription:name,Tenant:tenantId}" \
                         --output table
 
+                      # Pass the subscription ID into Terraform
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+                      export TF_VAR_subscription_id="$ARM_SUBSCRIPTION_ID"
+
 
                       echo "Initializing Terraform"
 
@@ -428,7 +432,6 @@ stages:
 
 
                       echo "Terraform deployment completed"
-
 
 
 
