@@ -19,6 +19,8 @@ variables:
   imageName: 'azure-threatshield'
   imageTag: '$(Build.BuildId)'
 
+  acrName: 'acrthreatshieldprasad26'
+
 stages:
 
   - stage: Validation
@@ -33,10 +35,6 @@ stages:
           - checkout: self
             clean: true
 
-          # OpenSSL 3.5 on the hosted agent defaults to a post-quantum TLS
-          # group, producing an oversized ClientHello that a middlebox on the
-          # path drops (UNEXPECTED_EOF_WHILE_READING). Pinning the classic
-          # x25519 group shrinks the handshake. Exported to all later steps.
           - script: |
               set -e
               cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
@@ -65,8 +63,6 @@ stages:
                 pip | "$(Agent.OS)"
               path: $(PIP_CACHE_DIR)
 
-          # Resilient install: task-level retry handles transient PyPI/TLS
-          # drops, and the generous timeout/retry env values give pip room.
           - script: |
               set -euxo pipefail
               python -m pip install --prefer-binary --progress-bar off \
@@ -119,15 +115,11 @@ stages:
 
           - script: |
               set -e
-
               echo "Installing Terraform ${TERRAFORM_VERSION}"
-
               curl -fsSLo terraform.zip \
                 "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-
               unzip -o terraform.zip
               sudo mv terraform /usr/local/bin/terraform
-
               terraform version
             displayName: 'Install Terraform'
             env:
@@ -135,13 +127,8 @@ stages:
 
           - script: |
               set -e
-
               terraform fmt -check -recursive -diff
-
-              terraform init \
-                -backend=false \
-                -input=false
-
+              terraform init -backend=false -input=false
               terraform validate
             displayName: 'Terraform fmt, init, validate'
             workingDirectory: $(terraformWorkingDirectory)
@@ -181,7 +168,6 @@ stages:
 
           - script: |
               set -e
-
               python -m pip install checkov==3.4.6
               checkov --version
             displayName: 'Install Checkov'
@@ -189,7 +175,6 @@ stages:
 
           - script: |
               set -e
-
               checkov \
                 --directory $(terraformWorkingDirectory) \
                 --framework terraform \
@@ -212,17 +197,13 @@ stages:
   - stage: TerraformApply
     displayName: 'Provision Infrastructure'
     dependsOn: IacSecurity
-    # Only provision real infra from main — never from a feature branch.
     condition: >-
       and(succeeded(),
-          eq(variables['Build.SourceBranch'], 'refs/heads/feature/integrate-threatshield'))
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'))
 
     jobs:
       - deployment: ApplyInfra
         displayName: 'Terraform Apply'
-        # Add an "Approvals" check on this environment in the Azure DevOps UI
-        # (Pipelines -> Environments -> threatshield-prod) so the run pauses
-        # for your review before anything is created or destroyed.
         environment: 'threatshield-prod'
         strategy:
           runOnce:
@@ -230,10 +211,6 @@ stages:
               steps:
                 - checkout: self
 
-                # The Azure CLI ships its OWN bundled OpenSSL, which still
-                # offers the post-quantum group and gets reset by the network.
-                # Here we also force TLS 1.2, which has no PQ group at all, and
-                # feed the config straight into the AzureCLI task below.
                 - script: |
                     set -e
                     cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
@@ -249,27 +226,29 @@ stages:
                     echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
                   displayName: 'Pin classic TLS groups (TLS 1.2)'
 
-                # Fresh VM each stage, so install Terraform again here.
+                # PROBE: plain curl (honors the pin) to the login endpoint,
+                # BEFORE az runs. If this returns HTTP 200 but az still resets,
+                # the az bundle is ignoring the config. If this resets too,
+                # the endpoint is firewalled on the agent network.
+                - script: |
+                    echo "OPENSSL_CONF=$OPENSSL_CONF"
+                    curl -sS -o /dev/null -w "login endpoint: HTTP %{http_code}\n" \
+                      https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration \
+                      || echo "login endpoint: FAILED"
+                  displayName: 'Probe login endpoint'
+
                 - script: |
                     set -e
-
                     echo "Installing Terraform ${TERRAFORM_VERSION}"
-
                     curl -fsSLo terraform.zip \
                       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-
                     unzip -o terraform.zip
                     sudo mv terraform /usr/local/bin/terraform
-
                     terraform version
                   displayName: 'Install Terraform'
                   env:
                     TERRAFORM_VERSION: $(terraformVersion)
 
-                # Terraform runs INSIDE the Azure task so it is authenticated
-                # against your subscription via the service connection.
-                # OPENSSL_CONF is passed explicitly so the task's internal
-                # `az login` uses the TLS 1.2 / x25519 config too.
                 - task: AzureCLI@2
                   displayName: 'Terraform init, plan, apply'
                   env:
@@ -282,13 +261,8 @@ stages:
                     workingDirectory: $(terraformWorkingDirectory)
                     inlineScript: |
                       set -euo pipefail
-
-                      # Real remote backend this time (NOT -backend=false),
-                      # so state persists and apply knows what already exists.
                       terraform init  -input=false
-
                       terraform plan  -input=false -out=tfplan
-
                       terraform apply -input=false -auto-approve tfplan
 
 
@@ -331,57 +305,35 @@ stages:
 
           - script: |
               set -e
-
               docker images $(imageName)
-
-              docker image inspect \
-                $(imageName):$(imageTag) \
-                > /dev/null
+              docker image inspect $(imageName):$(imageTag) > /dev/null
             displayName: 'Verify Docker Image'
 
           - script: |
               set -e
-
               sudo apt-get update -qq
-
-              sudo apt-get install -y -qq \
-                wget \
-                gnupg
-
-              wget -qO - \
-                https://aquasecurity.github.io/trivy-repo/deb/public.key \
-                | gpg --dearmor \
-                | sudo tee /usr/share/keyrings/trivy.gpg \
-                > /dev/null
-
-              echo \
-                "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+              sudo apt-get install -y -qq wget gnupg
+              wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+                | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+              echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
                 | sudo tee /etc/apt/sources.list.d/trivy.list
-
               sudo apt-get update -qq
               sudo apt-get install -y -qq trivy
-
               trivy --version
             displayName: 'Install Trivy'
             retryCountOnTaskFailure: 2
 
           - script: |
               set -e
-
               mkdir -p $(Pipeline.Workspace)/trivy-templates
-
-              wget -q \
-                https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl \
+              wget -q https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl \
                 -O $(Pipeline.Workspace)/trivy-templates/junit.tpl
-
               test -f $(Pipeline.Workspace)/trivy-templates/junit.tpl
-
               echo "Trivy JUnit template downloaded successfully"
             displayName: 'Download Trivy JUnit Template'
 
           - script: |
               set -e
-
               trivy image \
                 --scanners vuln \
                 --exit-code 0 \
@@ -393,7 +345,6 @@ stages:
 
           - script: |
               set -e
-
               trivy image \
                 --scanners vuln \
                 --severity CRITICAL \
@@ -464,32 +415,17 @@ stages:
 
           - task: AzureCLI@2
             displayName: 'Push ThreatShield Image to ACR'
-            condition: succeeded()
             env:
               OPENSSL_CONF: $(Agent.TempDirectory)/openssl-classic.cnf
+              GODEBUG: 'tlsmlkem=0,tlskyber=0'
             inputs:
               azureSubscription: 'threatshield-azure'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
                 set -euo pipefail
-
-                ACR_NAME="acrthreatshieldprasad26"
-                IMAGE="$(imageName)"
-                TAG="$(imageTag)"
-
-                az acr login --name "$ACR_NAME"
-
-                ACR_LOGIN_SERVER=$(az acr show \
-                  --name "$ACR_NAME" \
-                  --query loginServer \
-                  -o tsv)
-
-                docker tag \
-                  "$IMAGE:$TAG" \
-                  "$ACR_LOGIN_SERVER/$IMAGE:$TAG"
-
-                docker push \
-                  "$ACR_LOGIN_SERVER/$IMAGE:$TAG"
-
+                az acr login --name "$(acrName)"
+                ACR_LOGIN_SERVER=$(az acr show --name "$(acrName)" --query loginServer -o tsv)
+                docker tag  $(imageName):$(imageTag) $ACR_LOGIN_SERVER/$(imageName):$(imageTag)
+                docker push $ACR_LOGIN_SERVER/$(imageName):$(imageTag)
                 echo "Image pushed to ACR successfully"
