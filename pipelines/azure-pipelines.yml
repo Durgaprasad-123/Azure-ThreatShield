@@ -4,22 +4,36 @@ trigger:
       - main
       - feature/integrate-threatshield
 
+
 pool:
   vmImage: 'ubuntu-latest'
 
+
 variables:
+
+
   PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip-cache
   PIP_DEFAULT_TIMEOUT: '120'
   PIP_RETRIES: '10'
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
 
+
+
   terraformWorkingDirectory: 'infra/terraform'
   terraformVersion: '1.15.7'
+
+
+
+  azureServiceConnection: 'threatshield-azure'
+
+  acrName: 'acrthreatshieldprasad26'
+
+
 
   imageName: 'azure-threatshield'
   imageTag: '$(Build.BuildId)'
 
-  acrName: 'acrthreatshieldprasad26'
+
 
 stages:
 
@@ -27,154 +41,176 @@ stages:
     displayName: 'Code Validation'
 
     jobs:
+
       - job: PythonValidation
         displayName: 'Validate Python Application'
+
         timeoutInMinutes: 20
 
         steps:
+
           - checkout: self
             clean: true
 
-          - script: |
-              set -e
-              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
-              openssl_conf = openssl_init
-              [openssl_init]
-              ssl_conf = ssl_sect
-              [ssl_sect]
-              system_default = system_default_sect
-              [system_default_sect]
-              Groups = x25519
-              EOF
-              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-            displayName: 'Pin classic TLS groups'
 
           - task: UsePythonVersion@0
-            displayName: 'Set up Python'
+            displayName: 'Set up Python 3.12'
+
             inputs:
               versionSpec: '3.12'
               addToPath: true
 
+
           - task: Cache@2
-            displayName: 'Cache pip'
+            displayName: 'Cache pip packages'
+
             inputs:
               key: 'pip | "$(Agent.OS)" | requirements.txt'
+
               restoreKeys: |
                 pip | "$(Agent.OS)"
+
               path: $(PIP_CACHE_DIR)
 
+
           - script: |
-              set -euxo pipefail
-              python -m pip install --prefer-binary --progress-bar off \
-                -r requirements.txt ruff
+              set -euo pipefail
+
+              python -m pip --version
+
+              python -m pip install \
+                --prefer-binary \
+                --progress-bar off \
+                -r requirements.txt \
+                ruff
+
               python -m pip check
+
               ruff --version
+
             displayName: 'Install dependencies'
+
             timeoutInMinutes: 15
+
             retryCountOnTaskFailure: 2
+
             env:
               PIP_DEFAULT_TIMEOUT: '120'
               PIP_RETRIES: '10'
 
-          - script: |
-              set -e
-              python -m pytest
-            displayName: 'Run Unit Tests'
 
           - script: |
-              set -e
+              set -euo pipefail
+
+              python -m pytest
+
+            displayName: 'Run Unit Tests'
+
+
+          - script: |
+              set -euo pipefail
+
               ruff check app
+
             displayName: 'Run Ruff Linting'
+
 
 
   - stage: Terraform
     displayName: 'Terraform Validation'
+
     dependsOn: Validation
+
     condition: succeeded()
 
     jobs:
-      - job: CheckFormat
-        displayName: 'Check Terraform Formatting and Configuration'
+
+      - job: TerraformValidation
+        displayName: 'Validate Terraform Configuration'
 
         steps:
+
           - checkout: self
 
-          - script: |
-              set -e
-              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
-              openssl_conf = openssl_init
-              [openssl_init]
-              ssl_conf = ssl_sect
-              [ssl_sect]
-              system_default = system_default_sect
-              [system_default_sect]
-              Groups = x25519
-              EOF
-              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-            displayName: 'Pin classic TLS groups'
 
           - script: |
-              set -e
-              echo "Installing Terraform ${TERRAFORM_VERSION}"
+              set -euo pipefail
+
+              echo "Installing Terraform $(terraformVersion)"
+
               curl -fsSLo terraform.zip \
-                "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+                "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip"
+
               unzip -o terraform.zip
+
               sudo mv terraform /usr/local/bin/terraform
+
               terraform version
+
             displayName: 'Install Terraform'
-            env:
-              TERRAFORM_VERSION: $(terraformVersion)
+
 
           - script: |
-              set -e
-              terraform fmt -check -recursive -diff
-              terraform init -backend=false -input=false
+              set -euo pipefail
+
+              terraform fmt \
+                -check \
+                -recursive \
+                -diff
+
+              terraform init \
+                -backend=false \
+                -input=false
+
               terraform validate
-            displayName: 'Terraform fmt, init, validate'
+
+            displayName: 'Terraform fmt, init and validate'
+
             workingDirectory: $(terraformWorkingDirectory)
 
 
+
+
   - stage: IacSecurity
-    displayName: 'Scan Terraform for Security Misconfigurations'
+    displayName: 'Terraform Security Scan'
+
     dependsOn: Terraform
+
     condition: succeeded()
 
     jobs:
+
       - job: Checkov
-        displayName: 'Scan Terraform with Checkov'
+        displayName: 'Run Checkov'
 
         steps:
+
           - checkout: self
 
-          - script: |
-              set -e
-              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
-              openssl_conf = openssl_init
-              [openssl_init]
-              ssl_conf = ssl_sect
-              [ssl_sect]
-              system_default = system_default_sect
-              [system_default_sect]
-              Groups = x25519
-              EOF
-              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-            displayName: 'Pin classic TLS groups'
 
           - task: UsePythonVersion@0
-            displayName: 'Set up Python'
+            displayName: 'Set up Python 3.12'
+
             inputs:
               versionSpec: '3.12'
               addToPath: true
 
-          - script: |
-              set -e
-              python -m pip install checkov==3.4.6
-              checkov --version
-            displayName: 'Install Checkov'
-            retryCountOnTaskFailure: 2
 
           - script: |
-              set -e
+              set -euo pipefail
+
+              python -m pip install checkov==3.4.6
+
+              checkov --version
+
+            displayName: 'Install Checkov'
+
+            retryCountOnTaskFailure: 2
+
+
+          - script: |
+              set -euo pipefail
+
               checkov \
                 --directory $(terraformWorkingDirectory) \
                 --framework terraform \
@@ -182,169 +218,258 @@ stages:
                 --output junitxml \
                 --output-file-path console,$(Common.TestResultsDirectory) \
                 --soft-fail
+
             displayName: 'Run Checkov Scan'
+
 
           - task: PublishTestResults@2
             displayName: 'Publish Checkov Results'
+
             condition: succeededOrFailed()
+
             inputs:
               testResultsFormat: 'JUnit'
-              testResultsFiles: '$(Common.TestResultsDirectory)/results_junitxml.xml'
-              testRunTitle: 'Checkov IaC Scan'
+
+              testResultsFiles: |
+                $(Common.TestResultsDirectory)/results_junitxml.xml
+
+              testRunTitle: 'Checkov IaC Security Scan'
+
               failTaskOnFailedTests: false
 
 
+
+
+
   - stage: TerraformApply
-    displayName: 'Provision Infrastructure'
+    displayName: 'Provision Azure Infrastructure'
+
     dependsOn: IacSecurity
-    condition: >-
-      and(succeeded(),
-          eq(variables['Build.SourceBranch'], 'refs/heads/feature/integrate-threatshield'))
+
+    condition: |
+      and(
+        succeeded(),
+        eq(
+          variables['Build.SourceBranch'],
+          'refs/heads/feature/integrate-threatshield'
+        )
+      )
 
     jobs:
-      - deployment: ApplyInfra
+
+      - deployment: ApplyInfrastructure
         displayName: 'Terraform Apply'
-        environment: 'threatshield-prod'
+
+        environment: 'threatshield-dev'
+
         strategy:
+
           runOnce:
+
             deploy:
+
               steps:
+
                 - checkout: self
 
-                - script: |
-                    set -e
-                    cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
-                    openssl_conf = openssl_init
-                    [openssl_init]
-                    ssl_conf = ssl_sect
-                    [ssl_sect]
-                    system_default = system_default_sect
-                    [system_default_sect]
-                    Groups = x25519
-                    MaxProtocol = TLSv1.2
-                    EOF
-                    echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-                  displayName: 'Pin classic TLS groups (TLS 1.2)'
-
-                # PROBE: plain curl (honors the pin) to the login endpoint,
-                # BEFORE az runs. If this returns HTTP 200 but az still resets,
-                # the az bundle is ignoring the config. If this resets too,
-                # the endpoint is firewalled on the agent network.
-                - script: |
-                    echo "OPENSSL_CONF=$OPENSSL_CONF"
-                    curl -sS -o /dev/null -w "login endpoint: HTTP %{http_code}\n" \
-                      https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration \
-                      || echo "login endpoint: FAILED"
-                  displayName: 'Probe login endpoint'
 
                 - script: |
-                    set -e
-                    echo "Installing Terraform ${TERRAFORM_VERSION}"
+                    set -euo pipefail
+
+                    echo "Installing Terraform $(terraformVersion)"
+
                     curl -fsSLo terraform.zip \
-                      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+                      "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip"
+
                     unzip -o terraform.zip
+
                     sudo mv terraform /usr/local/bin/terraform
+
                     terraform version
+
                   displayName: 'Install Terraform'
-                  env:
-                    TERRAFORM_VERSION: $(terraformVersion)
+
 
                 - task: AzureCLI@2
-                  displayName: 'Terraform init, plan, apply'
+                  displayName: 'Terraform Plan and Apply'
+
                   inputs:
-                    azureSubscription: 'threatshield-azure'
+
+                    azureSubscription: '$(azureServiceConnection)'
+
                     scriptType: 'bash'
+
                     scriptLocation: 'inlineScript'
+
                     workingDirectory: $(terraformWorkingDirectory)
+
                     inlineScript: |
+
                       set -euo pipefail
 
-                      az account show --output table
+                      echo "Azure authentication successful"
 
-                      terraform init -input=false
-                      terraform plan -input=false -out=tfplan
-                      terraform apply -input=false -auto-approve tfplan
+                      az account show \
+                        --query "{Subscription:name,Tenant:tenantId}" \
+                        --output table
+
+
+                      echo "Initializing Terraform"
+
+                      terraform init \
+                        -input=false
+
+
+                      echo "Creating Terraform plan"
+
+                      terraform plan \
+                        -input=false \
+                        -out=tfplan
+
+
+                      echo "Applying Terraform plan"
+
+                      terraform apply \
+                        -input=false \
+                        -auto-approve \
+                        tfplan
+
+
+                      echo "Terraform deployment completed"
+
+
 
 
   - stage: DockerBuild
-    displayName: 'Docker Build and Container Scan'
-    dependsOn: TerraformApply
+    displayName: 'Docker Build and Container Security'
+
+    dependsOn: IacSecurity
+
     condition: succeeded()
 
     jobs:
+
       - job: BuildImage
-        displayName: 'Build and Scan FastAPI Container'
+        displayName: 'Build and Scan ThreatShield Image'
 
         steps:
+
           - checkout: self
 
-          - script: |
-              set -e
-              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
-              openssl_conf = openssl_init
-              [openssl_init]
-              ssl_conf = ssl_sect
-              [ssl_sect]
-              system_default = system_default_sect
-              [system_default_sect]
-              Groups = x25519
-              EOF
-              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-            displayName: 'Pin classic TLS groups'
 
           - task: Docker@2
             displayName: 'Build Azure ThreatShield Image'
+
             retryCountOnTaskFailure: 2
+
             inputs:
+
               command: 'build'
+
               repository: '$(imageName)'
+
               Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+
               buildContext: '$(Build.SourcesDirectory)'
+
               tags: |
                 $(imageTag)
 
+
           - script: |
-              set -e
+              set -euo pipefail
+
               docker images $(imageName)
-              docker image inspect $(imageName):$(imageTag) > /dev/null
+
+              docker image inspect \
+                $(imageName):$(imageTag) \
+                > /dev/null
+
+              echo "Docker image exists"
+
             displayName: 'Verify Docker Image'
 
+
           - script: |
-              set -e
+              set -euo pipefail
+
               sudo apt-get update -qq
-              sudo apt-get install -y -qq wget gnupg
-              wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-                | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-              echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
-                | sudo tee /etc/apt/sources.list.d/trivy.list
+
+              sudo apt-get install \
+                -y \
+                -qq \
+                wget \
+                gnupg
+
+
+              wget -qO - \
+                https://aquasecurity.github.io/trivy-repo/deb/public.key \
+                | gpg --dearmor \
+                | sudo tee /usr/share/keyrings/trivy.gpg \
+                > /dev/null
+
+
+              echo \
+                "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+                | sudo tee \
+                  /etc/apt/sources.list.d/trivy.list
+
+
               sudo apt-get update -qq
-              sudo apt-get install -y -qq trivy
+
+              sudo apt-get install \
+                -y \
+                -qq \
+                trivy
+
+
               trivy --version
+
             displayName: 'Install Trivy'
+
             retryCountOnTaskFailure: 2
 
-          - script: |
-              set -e
-              mkdir -p $(Pipeline.Workspace)/trivy-templates
-              wget -q https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl \
-                -O $(Pipeline.Workspace)/trivy-templates/junit.tpl
-              test -f $(Pipeline.Workspace)/trivy-templates/junit.tpl
-              echo "Trivy JUnit template downloaded successfully"
-            displayName: 'Download Trivy JUnit Template'
+
 
           - script: |
-              set -e
+              set -euo pipefail
+
+              mkdir -p \
+                $(Pipeline.Workspace)/trivy-templates
+
+
+              wget -q \
+                https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl \
+                -O \
+                $(Pipeline.Workspace)/trivy-templates/junit.tpl
+
+
+              test -f \
+                $(Pipeline.Workspace)/trivy-templates/junit.tpl
+
+            displayName: 'Download Trivy JUnit Template'
+
+
+
+          - script: |
+              set -euo pipefail
+
               trivy image \
                 --scanners vuln \
                 --exit-code 0 \
                 --format template \
-                --template "@$(Pipeline.Workspace)/trivy-templates/junit.tpl" \
-                --output $(Common.TestResultsDirectory)/trivy-results.xml \
+                --template \
+                "@$(Pipeline.Workspace)/trivy-templates/junit.tpl" \
+                --output \
+                $(Common.TestResultsDirectory)/trivy-results.xml \
                 $(imageName):$(imageTag)
-            displayName: 'Trivy Scan - Generate Report'
+
+            displayName: 'Generate Trivy Vulnerability Report'
+
 
           - script: |
-              set -e
+              set -euo pipefail
+
               trivy image \
                 --scanners vuln \
                 --severity CRITICAL \
@@ -352,80 +477,169 @@ stages:
                 --exit-code 1 \
                 --skip-db-update \
                 $(imageName):$(imageTag)
-            displayName: 'Trivy Scan - Gate on CRITICAL'
+
+            displayName: 'Trivy Gate - Block CRITICAL Vulnerabilities'
+
 
           - task: PublishTestResults@2
             displayName: 'Publish Trivy Results'
+
             condition: succeededOrFailed()
+
             inputs:
+
               testResultsFormat: 'JUnit'
-              testResultsFiles: '$(Common.TestResultsDirectory)/trivy-results.xml'
-              testRunTitle: 'Trivy Container Scan'
+
+              testResultsFiles: |
+                $(Common.TestResultsDirectory)/trivy-results.xml
+
+              testRunTitle: 'Trivy Container Security Scan'
+
               failTaskOnFailedTests: false
 
+
           - script: |
-              set -e
-              docker save $(imageName):$(imageTag) -o $(Build.ArtifactStagingDirectory)/image.tar
-              ls -lh $(Build.ArtifactStagingDirectory)/image.tar
-            displayName: 'Save Image to Tarball'
+              set -euo pipefail
+
+              docker save \
+                $(imageName):$(imageTag) \
+                -o \
+                $(Build.ArtifactStagingDirectory)/image.tar
+
+              ls -lh \
+                $(Build.ArtifactStagingDirectory)/image.tar
+
+            displayName: 'Save Docker Image'
+
 
           - task: PublishPipelineArtifact@1
-            displayName: 'Publish Image Artifact'
+            displayName: 'Publish Docker Image Artifact'
+
             inputs:
-              targetPath: '$(Build.ArtifactStagingDirectory)/image.tar'
+
+              targetPath: |
+                $(Build.ArtifactStagingDirectory)/image.tar
+
               artifact: 'threatshield-image'
 
 
+
   - stage: AcrPush
-    displayName: 'Push Image to ACR'
-    dependsOn: DockerBuild
-    condition: succeeded()
+    displayName: 'Publish Image to Azure Container Registry'
+
+    dependsOn:
+      - DockerBuild
+      - TerraformApply
+
+    condition: |
+      and(
+        succeeded('DockerBuild'),
+        succeeded('TerraformApply'),
+        eq(
+          variables['Build.SourceBranch'],
+          'refs/heads/feature/integrate-threatshield'
+        )
+      )
 
     jobs:
+
       - job: PushToAcr
         displayName: 'Push ThreatShield Image to ACR'
 
         steps:
+
           - checkout: none
 
-          - script: |
-              set -e
-              cat > $(Agent.TempDirectory)/openssl-classic.cnf <<'EOF'
-              openssl_conf = openssl_init
-              [openssl_init]
-              ssl_conf = ssl_sect
-              [ssl_sect]
-              system_default = system_default_sect
-              [system_default_sect]
-              Groups = x25519
-              MaxProtocol = TLSv1.2
-              EOF
-              echo "##vso[task.setvariable variable=OPENSSL_CONF]$(Agent.TempDirectory)/openssl-classic.cnf"
-            displayName: 'Pin classic TLS groups (TLS 1.2)'
 
           - download: current
             artifact: 'threatshield-image'
-            displayName: 'Download Image Artifact'
+
+            displayName: 'Download Docker Image Artifact'
+
 
           - script: |
-              set -e
-              docker load -i $(Pipeline.Workspace)/threatshield-image/image.tar
-              docker images $(imageName)
-            displayName: 'Load Image'
+              set -euo pipefail
+
+              docker load \
+                -i \
+                $(Pipeline.Workspace)/threatshield-image/image.tar
+
+
+              docker image inspect \
+                $(imageName):$(imageTag) \
+                > /dev/null
+
+
+              echo "Docker image restored successfully"
+
+            displayName: 'Load Docker Image'
+
 
           - task: AzureCLI@2
-            displayName: 'Push ThreatShield Image to ACR'
-            env:
-              OPENSSL_CONF: $(Agent.TempDirectory)/openssl-classic.cnf
-              GODEBUG: 'tlsmlkem=0,tlskyber=0'
+            displayName: 'Authenticate and Push Image to ACR'
+
             inputs:
-              azureSubscription: 'threatshield-azure'
+
+              azureSubscription: '$(azureServiceConnection)'
+
               scriptType: 'bash'
+
               scriptLocation: 'inlineScript'
+
               inlineScript: |
+
                 set -euo pipefail
-                az acr login --name "$(acrName)"
-                ACR_LOGIN_SERVER=$(az acr show --name "$(acrName)" --query loginServer -o tsv)
-                docker tag  $(imageName):$(imageTag) $ACR_LOGIN_SERVER/$(imageName):$(imageTag)
-                docker push $ACR_LOGIN_SERVER/$(imageName):$(imageTag)
-                echo "Image pushed to ACR successfully"
+
+
+                echo "Azure authentication successful"
+
+                az account show \
+                  --query "{Subscription:name,Tenant:tenantId}" \
+                  --output table
+
+
+                echo "Checking ACR"
+
+                az acr show \
+                  --name "$(acrName)" \
+                  --query "{Name:name,LoginServer:loginServer}" \
+                  --output table
+
+
+                echo "Authenticating Docker to ACR"
+
+                az acr login \
+                  --name "$(acrName)"
+
+
+                ACR_LOGIN_SERVER=$(az acr show \
+                  --name "$(acrName)" \
+                  --query loginServer \
+                  --output tsv)
+
+
+                echo "Registry: $ACR_LOGIN_SERVER"
+
+
+                echo "Tagging image"
+
+                docker tag \
+                  $(imageName):$(imageTag) \
+                  $ACR_LOGIN_SERVER/$(imageName):$(imageTag)
+
+
+                echo "Pushing image"
+
+                docker push \
+                  $ACR_LOGIN_SERVER/$(imageName):$(imageTag)
+
+
+                echo "Verifying repository"
+
+                az acr repository show-tags \
+                  --name "$(acrName)" \
+                  --repository "$(imageName)" \
+                  --output table
+
+
+                echo "Azure ThreatShield image successfully published"
